@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#07060f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta property="og:title" content="ECO: Tú contra ti">
+<meta property="og:description" content="Cada intento tuyo vuelve como un eco. Esquívate a ti mismo.">
+<title>ECO: Tú contra ti</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root { --bg:#07060f; --fg:#f3f0ff; --dim:#8f89b3; --accent:#7cf7ff; --orb:#ffd166; --ghost:#ff5c8a; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow:hidden; overscroll-behavior:none; touch-action:none; user-select:none; -webkit-user-select:none; }
+  canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
+  #hud { position:fixed; top:calc(env(safe-area-inset-top) + 12px); left:16px; right:16px;
+    display:flex; justify-content:space-between; align-items:flex-start; pointer-events:none; font-weight:700; }
+  #hud .big { font-size:28px; line-height:1; }
+  #hud .small { font-size:12px; color:var(--dim); letter-spacing:.08em; text-transform:uppercase; margin-top:4px; }
+  #timer { position:fixed; left:0; top:0; height:3px; background:var(--accent); width:0; box-shadow:0 0 12px var(--accent); }
+  .screen { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:24px; gap:14px; background:radial-gradient(ellipse at center, rgba(20,16,48,.72), rgba(7,6,15,.94)); }
+  .hidden { display:none !important; }
+  h1 { margin:0; font-size:clamp(48px,16vw,84px); letter-spacing:.06em; font-weight:900;
+    background:linear-gradient(90deg,var(--accent),#b69cff,var(--ghost)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { color:var(--dim); font-size:16px; margin:0; }
+  .rules { color:var(--fg); opacity:.85; font-size:15px; max-width:320px; line-height:1.5; margin:6px 0 10px; }
+  .rules b { color:var(--accent); } .rules i { color:var(--ghost); font-style:normal; font-weight:700; } .rules u { color:var(--orb); text-decoration:none; font-weight:700; }
+  button { font:inherit; font-weight:800; font-size:18px; border:0; border-radius:999px; padding:16px 36px; cursor:pointer;
+    background:var(--accent); color:#07060f; box-shadow:0 0 24px rgba(124,247,255,.35); min-width:220px; }
+  button.alt { background:transparent; color:var(--fg); border:2px solid #3a3560; box-shadow:none; font-size:16px; padding:12px 28px; }
+  button.ad { background:var(--orb); box-shadow:0 0 24px rgba(255,209,102,.35); }
+  .stat { font-size:44px; font-weight:900; margin:0; } .statlbl { color:var(--dim); font-size:13px; letter-spacing:.1em; text-transform:uppercase; margin:0; }
+  .row { display:flex; gap:28px; }
+  #toast { position:fixed; left:50%; top:42%; transform:translate(-50%,-50%); font-size:26px; font-weight:900; pointer-events:none;
+    opacity:0; transition:opacity .25s; text-shadow:0 0 18px rgba(0,0,0,.8); white-space:nowrap; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="timer"></div>
+<div id="hud" class="hidden">
+  <div><div class="big" id="score">0</div><div class="small">orbes</div></div>
+  <div style="text-align:right"><div class="big" id="round">1</div><div class="small" id="echoes">0 ecos</div></div>
+</div>
+<div id="toast"></div>
+
+<div id="menu" class="screen">
+  <h1>ECO</h1>
+  <p class="sub">Tú contra ti</p>
+  <p class="rules">Arrastra el dedo para moverte y recoge <u>orbes</u> durante 20&nbsp;segundos.<br>
+  Cada ronda que sobrevives regresa como un <i>eco</i> que repite exactamente lo que hiciste.<br><b>No te toques a ti mismo.</b></p>
+  <button id="play">Jugar</button>
+  <p class="sub" id="bestMenu"></p>
+</div>
+
+<div id="over" class="screen hidden">
+  <p class="statlbl">Te alcanzó tu eco</p>
+  <div class="row">
+    <div><p class="stat" id="finalScore">0</p><p class="statlbl">orbes</p></div>
+    <div><p class="stat" id="finalRound">1</p><p class="statlbl">ronda</p></div>
+  </div>
+  <p class="sub" id="bestOver"></p>
+  <button id="revive" class="ad">▶ Continuar (ver anuncio)</button>
+  <button id="again">Otra vez</button>
+  <button id="share" class="alt">Retar a un amigo</button>
+</div>
+
+<div id="adScreen" class="screen hidden">
+  <p class="statlbl">Anuncio</p>
+  <p class="stat" id="adCount">5</p>
+  <p class="sub">Aquí irá el video con recompensa</p>
+</div>
+
+<script>
+(() => {
+  const ROUND_SECONDS = 20, SAMPLE_HZ = 30, PLAYER_R = 0.022, ORB_R = 0.018, GHOST_R = 0.02;
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  const $ = id => document.getElementById(id);
+  let W = 0, H = 0, S = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight; S = Math.min(W, H);
+    cv.width = W * DPR; cv.height = H * DPR; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  addEventListener('resize', resize); resize();
+
+  // Coordinates are normalized 0..1 on both axes; radii scale with the short side.
+  const toPx = (x, y) => [x * W, y * H];
+
+  // Seeded RNG so orbs appear in the same places every round — your echoes chase them too.
+  function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+                  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+  let best = store.get('eco_best', 0);
+
+  let state = 'menu', ghosts = [], path = [], round = 1, score = 0, t0 = 0, now = 0, revived = false;
+  let player = { x: .5, y: .75, tx: .5, ty: .75 }, orb = null, orbRand = null, particles = [], lastSample = 0, flash = 0;
+
+  function newOrb() {
+    const m = 0.1;
+    orb = { x: m + orbRand() * (1 - 2 * m), y: 0.15 + orbRand() * 0.75, born: now };
+  }
+  function startRound() {
+    t0 = performance.now(); now = 0; path = []; lastSample = -1;
+    player.x = player.tx = .5; player.y = player.ty = .75;
+    orbRand = rng(1337); newOrb();
+    $('round').textContent = round; $('echoes').textContent = ghosts.length + (ghosts.length === 1 ? ' eco' : ' ecos');
+    toast(round === 1 ? '¡Ya!' : `Ronda ${round}`, round === 1 ? '#7cf7ff' : '#ff5c8a');
+  }
+  function startGame() {
+    ghosts = []; round = 1; score = 0; revived = false; $('score').textContent = 0;
+    show(null); $('hud').classList.remove('hidden'); state = 'play'; startRound();
+  }
+  function endRound() {
+    ghosts.push(path); round++; burst(player.x, player.y, '#7cf7ff', 30); startRound();
+  }
+  function die() {
+    state = 'dead'; flash = 1; burst(player.x, player.y, '#ff5c8a', 40); vibrate(80);
+    if (score > best) { best = score; store.set('eco_best', best); }
+    setTimeout(() => {
+      $('finalScore').textContent = score; $('finalRound').textContent = round;
+      $('bestOver').textContent = `Récord: ${best}`;
+      $('revive').classList.toggle('hidden', revived || ghosts.length === 0);
+      show('over');
+    }, 700);
+  }
+  function revive() {
+    // Rewarded-ad stub: drop the newest echo and replay the round.
+    show('adScreen'); let n = 5; $('adCount').textContent = n;
+    const iv = setInterval(() => { n--; $('adCount').textContent = n;
+      if (n <= 0) { clearInterval(iv); revived = true; ghosts.pop(); show(null); state = 'play'; startRound(); } }, 1000);
+  }
+
+  function ghostPos(g, t) {
+    const f = t * SAMPLE_HZ, i = Math.floor(f);
+    if (i >= g.length - 1) return g[g.length - 1];
+    const a = g[i], b = g[i + 1], k = f - i;
+    return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+  }
+  const dist = (ax, ay, bx, by) => Math.hypot((ax - bx) * W, (ay - by) * H) / S;
+
+  function update(dt) {
+    if (state !== 'play') return;
+    now = (performance.now() - t0) / 1000;
+    const ease = 1 - Math.pow(0.0005, dt);
+    player.x += (player.tx - player.x) * ease; player.y += (player.ty - player.y) * ease;
+    const si = Math.floor(now * SAMPLE_HZ);
+    while (lastSample < si) { lastSample++; path.push({ x: player.x, y: player.y }); }
+
+    if (dist(player.x, player.y, orb.x, orb.y) < PLAYER_R + ORB_R + 0.01) {
+      score++; $('score').textContent = score; burst(orb.x, orb.y, '#ffd166', 14); vibrate(12); newOrb();
+    }
+    const grace = now < 0.8; // brief spawn protection
+    if (!grace) for (const g of ghosts) {
+      const p = ghostPos(g, now);
+      if (dist(player.x, player.y, p.x, p.y) < (PLAYER_R + GHOST_R) * 0.85) { die(); return; }
+    }
+    $('timer').style.width = Math.min(100, now / ROUND_SECONDS * 100) + '%';
+    if (now >= ROUND_SECONDS) endRound();
+  }
+
+  function burst(x, y, color, n) {
+    for (let i = 0; i < n; i++) { const a = Math.random() * 6.283, s = 0.1 + Math.random() * 0.4;
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, color }); }
+  }
+
+  function circle(x, y, r, color, glow) {
+    const [px, py] = toPx(x, y);
+    ctx.shadowBlur = glow; ctx.shadowColor = color; ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(px, py, r * S, 0, 6.283); ctx.fill(); ctx.shadowBlur = 0;
+  }
+  function trail(pts, color, width) {
+    if (pts.length < 2) return;
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); pts.forEach((p, i) => { const [px, py] = toPx(p.x, p.y); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }); ctx.stroke();
+  }
+
+  let menuT = 0;
+  function draw(dt) {
+    ctx.fillStyle = 'rgba(7,6,15,0.35)'; ctx.fillRect(0, 0, W, H);
+    // subtle grid
+    ctx.strokeStyle = 'rgba(124,247,255,0.035)'; ctx.lineWidth = 1; const step = S / 10;
+    for (let x = (W % step) / 2; x < W; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let y = (H % step) / 2; y < H; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+
+    if (state === 'menu') { // idle attract animation
+      menuT += dt;
+      for (let i = 0; i < 4; i++) { const a = menuT * (0.6 + i * 0.15) + i * 1.7;
+        circle(.5 + Math.cos(a) * .28, .5 + Math.sin(a * 1.3) * .3, GHOST_R, i ? '#ff5c8a88' : '#7cf7ff', 18); }
+    }
+    if (state === 'play' || state === 'dead') {
+      const pulse = 1 + Math.sin(now * 8) * 0.12;
+      circle(orb.x, orb.y, ORB_R * pulse, '#ffd166', 24);
+      ghosts.forEach((g, gi) => {
+        const alpha = 0.35 + 0.5 * (gi + 1) / ghosts.length;
+        const tailStart = Math.max(0, Math.floor((now - 0.5) * SAMPLE_HZ)), tailEnd = Math.min(g.length, Math.floor(now * SAMPLE_HZ) + 1);
+        trail(g.slice(tailStart, tailEnd), `rgba(255,92,138,${alpha * 0.4})`, GHOST_R * S);
+        const p = ghostPos(g, now); circle(p.x, p.y, GHOST_R, `rgba(255,92,138,${alpha})`, 16);
+      });
+      if (state === 'play') {
+        trail(path.slice(-12), 'rgba(124,247,255,0.35)', PLAYER_R * S * 1.2);
+        circle(player.x, player.y, PLAYER_R, '#7cf7ff', 26);
+      }
+    }
+    particles = particles.filter(p => (p.life -= dt * 1.6) > 0);
+    for (const p of particles) { p.x += p.vx * dt * (S / W); p.y += p.vy * dt * (S / H);
+      ctx.globalAlpha = p.life; circle(p.x, p.y, 0.006, p.color, 8); ctx.globalAlpha = 1; }
+    if (flash > 0) { ctx.fillStyle = `rgba(255,92,138,${flash * 0.35})`; ctx.fillRect(0, 0, W, H); flash -= dt * 2; }
+  }
+
+  let last = performance.now();
+  function loop(t) { const dt = Math.min(0.05, (t - last) / 1000); last = t; update(dt); draw(dt); requestAnimationFrame(loop); }
+  requestAnimationFrame(loop);
+
+  // Input: the player follows the finger with an offset so it isn't hidden under the thumb.
+  function setTarget(e) {
+    if (state !== 'play') return;
+    const touch = e.touches ? e.touches[0] : e; if (!touch) return;
+    const offset = e.touches ? 60 : 0;
+    player.tx = Math.max(0.02, Math.min(0.98, touch.clientX / W));
+    player.ty = Math.max(0.02, Math.min(0.98, (touch.clientY - offset) / H));
+    if (e.cancelable) e.preventDefault();
+  }
+  ['touchstart', 'touchmove'].forEach(ev => cv.addEventListener(ev, setTarget, { passive: false }));
+  cv.addEventListener('mousemove', setTarget);
+
+  function show(id) { ['menu', 'over', 'adScreen'].forEach(s => $(s).classList.toggle('hidden', s !== id)); }
+  function toast(msg, color) { const el = $('toast'); el.textContent = msg; el.style.color = color; el.style.opacity = 1;
+    clearTimeout(toast.t); toast.t = setTimeout(() => el.style.opacity = 0, 900); }
+  function vibrate(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch {} }
+
+  $('bestMenu').textContent = best ? `Récord: ${best}` : '';
+  $('play').onclick = startGame;
+  $('again').onclick = startGame;
+  $('revive').onclick = revive;
+  $('share').onclick = async () => {
+    const text = `Llegué a la ronda ${round} con ${score} orbes en ECO: Tú contra ti. ¿Me superas?`;
+    const url = location.href.split('#')[0];
+    try { if (navigator.share) await navigator.share({ title: 'ECO', text, url });
+          else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Enlace copiado', '#7cf7ff'); } } catch {}
+  };
+})();
+</script>
+</body>
+</html>
