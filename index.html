@@ -79,6 +79,7 @@
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .pill{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:3px 7px;border-radius:6px;background:rgba(11,14,38,.18)}
   .small{font-size:12px;color:var(--muted);line-height:1.45}
+  .small a{color:var(--ghost);text-decoration:none}
   .big{font-family:'Unbounded',sans-serif;font-weight:800;font-size:56px;line-height:1;font-variant-numeric:tabular-nums}
   .kicker{font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ghost)}
   .title{font-family:'Unbounded',sans-serif;font-weight:800;font-size:24px}
@@ -168,7 +169,8 @@
       <button class="btn alt" id="shopBtn">Tienda</button>
     </div>
     <div class="small"><span class="luz" id="luzMenu">✦ 0</span> · Récord: <span id="bestMenu">0</span></div>
-    <div class="small">Prototipo · anuncios y compras simulados</div>
+    <div class="small" id="protoNote">Prototipo · anuncios y compras simulados</div>
+    <div class="small" id="legalLinks" hidden><a href="#" id="privLink">Privacidad</a><span id="adPrivWrap" hidden> · <a href="#" id="adPrivLink">Opciones de anuncios</a></span></div>
   </div>
 </div>
 
@@ -256,6 +258,7 @@
 <script>
 (() => {
   const $ = id => document.getElementById(id);
+  const N = window.EcoNative || null; // presente solo dentro de la app de iOS/Android
   const cv = $('c'), ctx = cv.getContext('2d');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -291,7 +294,7 @@
     else S.best = +localStorage.getItem('eco-best') || 0;
   } catch (e) {}
   S.inv = Object.assign({ rompe: 0, congela: 0, iman: 0, onda: 0 }, S.inv);
-  const persist = () => { try { localStorage.setItem('eco-save', JSON.stringify(S)); localStorage.setItem('eco-best', S.best); } catch (e) {} };
+  const persist = () => { const j = JSON.stringify(S); try { localStorage.setItem('eco-save', j); localStorage.setItem('eco-best', S.best); } catch (e) {} if (N) N.save(j); };
   function addLuz(n) { S.luz += n; runLuz += n; persist(); updLuz(); }
   function updLuz() { $('luzMenu').textContent = '✦ ' + S.luz; $('luzShop').textContent = '✦ ' + S.luz; $('bestMenu').textContent = S.best; }
   let toastT;
@@ -404,7 +407,7 @@
       parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, c: color }); }
   }
   function floatText(x, y, s, c) { texts.push({ x, y, s, c, life: 1 }); }
-  function buzz(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} }
+  function buzz(ms) { if (N) return N.haptic(ms); try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} }
 
   function tick() {
     rec[step * 2] = player.x; rec[step * 2 + 1] = player.y;
@@ -453,7 +456,7 @@
     killer = i; state = 'dying'; deaths++; endRoundItems(); show('loadout', false);
     burst(px(player), py(player), C.amber, 40, 1.4); burst(px(player), py(player), C.ghost, 20, 1);
     shake = reduce ? 0 : 14; buzz([40, 30, 60]); show('hint', false);
-    setTimeout(() => (deaths % 3 === 0 && !S.noAds ? showAd('inter', showDead) : showDead()), 750);
+    setTimeout(() => (deaths % 3 === 0 && !S.noAds ? showAd('inter', showDead, null, showDead) : showDead()), 750);
   }
   function recordRun() {
     maxRoundRun = Math.max(maxRoundRun, roundNo);
@@ -486,7 +489,20 @@
     setTimeout(() => { if (state === 'clear') startRound(); }, 1600);
   }
   let adTimer;
-  function showAd(kind, done, text) {
+  let adBusy = false;
+  function showAd(kind, done, text, fail) {
+    if (N) {
+      if (adBusy) return; adBusy = true;
+      const rewarded = kind !== 'inter';
+      if (rewarded) { only('ad'); $('adKind').textContent = 'Anuncio con recompensa'; $('adCount').textContent = '…';
+        $('adText').textContent = 'Cargando el video…'; const b = $('adClose'); b.disabled = true; b.textContent = 'Un momento…'; b.onclick = null; }
+      (rewarded ? N.showRewarded() : N.showInterstitial().then(() => true)).then(ok => {
+        adBusy = false;
+        if (ok) done();
+        else { if (rewarded) toast('No hay anuncios disponibles ahora. Intenta en un momento.'); (fail || done)(); }
+      });
+      return;
+    }
     only('ad');
     const rewarded = kind !== 'inter'; let n = rewarded ? 5 : 3;
     $('adKind').textContent = rewarded ? 'Anuncio con recompensa' : 'Anuncio intersticial';
@@ -510,7 +526,7 @@
   $('rankBtn').onclick = () => open('rank'); $('shopBtn').onclick = () => open('shop');
   $('deadRank').onclick = () => open('rank'); $('deadShop').onclick = () => open('shop');
   $('deadMenu').onclick = () => { refundArmed(); state = 'menu'; echoes = []; show('hud', false); only('menu'); updLuz(); };
-  $('contBtn').onclick = () => showAd('rewarded', () => { echoes.splice(killer, 1); continued = true; startRound(); });
+  $('contBtn').onclick = () => showAd('rewarded', () => { echoes.splice(killer, 1); continued = true; startRound(); }, null, () => only('dead'));
 
   // ---------- nombre ----------
   function setName(v) {
@@ -542,8 +558,8 @@
   }
   (async () => {
     try {
-      if (!window.claude || !claude.use) return;
-      db = await claude.use('db');
+      if (N && N.rankingDb) db = await N.rankingDb();
+      else if (window.claude && claude.use) db = await claude.use('db');
       if (!db) return;
       db.collection('ranking').orderBy('best', 'desc').limit(200).onSnapshot(snap => {
         globalBoard = snap.docs.map(d => ({ id: d.id, ...d.data() }))
@@ -592,6 +608,13 @@
   document.querySelectorAll('[data-rs]').forEach(b => b.onclick = () => { rankSort = b.dataset.rs; renderRank(); });
 
   // ---------- tienda ----------
+  function grantPremium(id) {
+    const p = PREMIUM.find(x => x.id === id); if (!p) return;
+    if (p.give) Object.entries(p.give).forEach(([k, v]) => S.inv[k] += v);
+    if (p.luz) S.luz += p.luz;
+    if (p.noAds) S.noAds = true;
+    persist(); updLuz(); if (!$('shop').hidden) renderShop();
+  }
   let shopTab = 'free';
   function itemRow(g, c, title, desc, own, btnLabel, btnCls, disabled, onClick) {
     const d = document.createElement('div'); d.className = 'item';
@@ -622,7 +645,7 @@
       wrap.appendChild(itemRow('▶', C.ghost, 'Ver un anuncio', 'Te quedan ' + left + ' hoy', null, '+' + AD_LUZ + ' ✦', 'ad', left <= 0, () => {
         const ret = back;
         showAd('rewarded', () => { S.adCount++; addLuz(AD_LUZ); toast('+' + AD_LUZ + ' ✦'); only('shop'); back = ret; renderShop(); },
-          'Video con recompensa. Al terminar recibes ' + AD_LUZ + ' ✦ para canjear ítems.');
+          'Video con recompensa. Al terminar recibes ' + AD_LUZ + ' ✦ para canjear ítems.', () => { only('shop'); back = ret; renderShop(); });
       }));
       const rows = [
         ['Primera partida del día', '+' + DAILY],
@@ -637,17 +660,21 @@
       t.classList.add('earn'); lst.appendChild(t); wrap.appendChild(lst);
     } else {
       const n = document.createElement('div'); n.className = 'note';
-      n.textContent = 'Precios de ejemplo. En el prototipo las compras son simuladas y no cobran nada; en la app real pasan por App Store o Google Play.';
+      n.textContent = N ? 'Pagos seguros con tu cuenta de ' + N.storeName + '.' : 'Precios de ejemplo. En el prototipo las compras son simuladas y no cobran nada; en la app real pasan por App Store o Google Play.';
       wrap.appendChild(n);
       PREMIUM.forEach(p => {
         const owned = p.noAds ? (S.noAds ? 'Activo' : null) : p.give && p.give.onda ? 'Tienes ' + S.inv.onda : null;
-        wrap.appendChild(itemRow(p.g, p.c, p.name, p.desc, owned, '<span class="price">' + p.price + '</span>', '', p.noAds && S.noAds, () => {
-          if (p.give) Object.entries(p.give).forEach(([k, v]) => S.inv[k] += v);
-          if (p.luz) S.luz += p.luz;
-          if (p.noAds) S.noAds = true;
-          persist(); toast('Compra simulada: ' + p.name); renderShop();
+        const price = N ? (N.price(p.id) || '…') : p.price;
+        wrap.appendChild(itemRow(p.g, p.c, p.name, p.desc, owned, '<span class="price">' + price + '</span>', '', (p.noAds && S.noAds) || (N && !N.price(p.id)), () => {
+          if (!N) { grantPremium(p.id); toast('Compra simulada: ' + p.name); return; }
+          N.buy(p.id).then(r => { if (r === 'ok') toast('¡Gracias! ' + p.name + ' ya es tuyo.'); else if (r === 'pending') toast('Pago pendiente. Lo recibirás al confirmarse.'); else if (r !== 'cancel') toast('No se pudo completar la compra.'); renderShop(); });
         }));
       });
+      if (N) {
+        const rb = document.createElement('button'); rb.className = 'btn alt sm'; rb.textContent = 'Restaurar compras'; rb.style.width = '100%';
+        rb.onclick = () => N.restore().then(ok => { toast(ok ? 'Compras restauradas' : 'No encontramos compras para restaurar'); renderShop(); });
+        wrap.appendChild(rb);
+      }
     }
   }
   document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { shopTab = b.dataset.st; renderShop(); });
@@ -734,6 +761,31 @@
     now = ts; acc += Math.min(.1, (ts - last) / 1000); last = ts;
     while (acc >= STEP) { if (state === 'play') tick(); acc -= STEP; }
     render(); requestAnimationFrame(loop);
+  }
+  // ---------- pausa, botón atrás y enlace con la app ----------
+  function pause() {
+    if (state !== 'play') return;
+    state = 'ready'; drag = null; show('hint', true);
+    $('hintSub').textContent = 'Pausa · pon el dedo en la pantalla para seguir';
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+  if (N) {
+    N.onPause(pause);
+    N.onBack(() => {
+      if (!$('ad').hidden) return;
+      if (!$('rank').hidden || !$('shop').hidden) { only(back); updLuz(); return; }
+      if (state === 'play') { pause(); return; }
+      if (state === 'dying') return;
+      if (state === 'ready' || state === 'clear') { if (score > 0) recordRun(); $('deadMenu').onclick(); return; }
+      if (state === 'dead') { $('deadMenu').onclick(); return; }
+      N.exit();
+    });
+    N.onGrant(grantPremium);
+    N.ready(S);
+    show('protoNote', false); show('legalLinks', true);
+    $('privLink').onclick = e => { e.preventDefault(); N.openPrivacy(); };
+    $('adPrivLink').onclick = e => { e.preventDefault(); N.adPrivacyOptions(); };
+    N.onAdPrivacy(req => show('adPrivWrap', req));
   }
   updLuz();
   requestAnimationFrame(loop);

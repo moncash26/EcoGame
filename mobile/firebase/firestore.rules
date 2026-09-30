@@ -1,0 +1,25 @@
+rules_version = '2';
+// Reglas del ranking global de ECO. Pégalas en Firebase > Firestore > Reglas.
+// Cualquiera puede leer el ranking; cada jugador (sesión anónima) solo escribe su propia fila,
+// con datos válidos y sin poder bajar ni inflar de forma absurda sus marcas.
+service cloud.firestore {
+  match /databases/{db}/documents {
+    match /ranking/{id} {
+      allow read: if true;
+      allow create: if request.auth != null && valid() && request.resource.data.uid == request.auth.uid;
+      allow update: if request.auth != null && valid()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.best >= resource.data.best;
+      allow delete: if false;
+    }
+    function valid() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['name', 'best', 'round', 'updated', 'uid'])
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 16
+        && d.best is int && d.best >= 0 && d.best <= 2000000
+        && d.round is int && d.round >= 1 && d.round <= 500
+        && d.updated is int;
+    }
+  }
+}

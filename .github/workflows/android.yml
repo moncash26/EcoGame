@@ -1,0 +1,56 @@
+name: App Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['index.html', 'mobile/**', '.github/workflows/android.yml']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: mobile/package-lock.json }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21, cache: gradle }
+
+      - name: Preparar app
+        run: |
+          npm ci
+          npm run build
+          npx cap sync android
+          node scripts/configure-native.mjs
+
+      - name: APK de prueba (instalable directo en tu teléfono)
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eco-prueba-apk
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Paquete firmado para Google Play (.aab)
+        if: env.HAS_KEYSTORE == 'true'
+        working-directory: mobile/android
+        env:
+          ECO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ECO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ECO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/eco.keystore"
+          export ECO_KEYSTORE_PATH="$RUNNER_TEMP/eco.keystore"
+          ./gradlew --no-daemon bundleRelease
+
+      - uses: actions/upload-artifact@v4
+        if: env.HAS_KEYSTORE == 'true'
+        with:
+          name: eco-google-play-aab
+          path: mobile/android/app/build/outputs/bundle/release/app-release.aab

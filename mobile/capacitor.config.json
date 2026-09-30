@@ -1,0 +1,22 @@
+{
+  "appId": "io.github.moncash26.eco",
+  "appName": "ECO: Tú contra ti",
+  "webDir": "www",
+  "backgroundColor": "#0A0C18",
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": false,
+      "backgroundColor": "#0A0C18",
+      "showSpinner": false
+    },
+    "SystemBars": {
+      "insetsHandling": "css",
+      "initialViewportFitValueHint": "cover",
+      "style": "DARK"
+    }
+  },
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#0A0C18"
+  }
+}

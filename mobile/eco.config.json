@@ -1,0 +1,31 @@
+{
+  "_ayuda": "Configuración de ECO para la app. Mientras 'adsTestMode' sea true se muestran anuncios de prueba de Google y no se gana dinero. Ver PUBLICAR.md.",
+  "appId": "io.github.moncash26.eco",
+  "appName": "ECO: Tú contra ti",
+  "version": "1.0.0",
+  "build": 1,
+  "privacyUrl": "https://moncash26.github.io/EcoGame/privacy.html",
+
+  "adsTestMode": true,
+  "admob": {
+    "android": {
+      "appId": "ca-app-pub-3940256099942544~3347511713",
+      "rewarded": "ca-app-pub-3940256099942544/5224354917",
+      "interstitial": "ca-app-pub-3940256099942544/1033173712"
+    },
+    "ios": {
+      "appId": "ca-app-pub-3940256099942544~1458002511",
+      "rewarded": "ca-app-pub-3940256099942544/1712485313",
+      "interstitial": "ca-app-pub-3940256099942544/4411468910"
+    }
+  },
+
+  "products": {
+    "onda3":  { "store": "eco_onda3",  "consumable": true },
+    "rompe5": { "store": "eco_rompe5", "consumable": true },
+    "luz600": { "store": "eco_luz600", "consumable": true },
+    "noads":  { "store": "eco_noads",  "consumable": false }
+  },
+
+  "firebase": null
+}
